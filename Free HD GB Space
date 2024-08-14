@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Run diskutil info command and capture output
+disk_info=$(diskutil info /)
+
+# Extract free space information
+free_space=$(echo "$disk_info" | grep "Free Space" | awk '{print $3 " " $4}')
+
+# Format output with <result> tags
+echo "<result>$free_space</result>"
