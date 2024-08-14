@@ -1,0 +1,13 @@
+#!/bin/bash
+
+fileVaultStatus=$(fdesetup status | awk '{print $NF }' | tr -d .)
+
+if [[ "$fileVaultStatus" == "Off" ]]; then
+	open jamfselfservice://content?entity=policy&id=18&action=view
+	sudo jamf displayMessage -message "FileVault is required. Please enable FileVault through self service and then Log Out to start process"
+	echo "FileVault is not enabled"
+	else
+		sudo jamf recon
+		echo "FileVault is enabled"
+		
+fi
