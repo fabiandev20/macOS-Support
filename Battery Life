@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# Retrieve Battery Cycle Count
+cycle_count=$(system_profiler SPPowerDataType | grep "Cycle Count" | awk '{print $3}')
+
+# Determine Battery Health State based on Cycle Count
+if [ "$cycle_count" -lt 600 ]; then
+    health_state="Normal"
+elif [ "$cycle_count" -lt 1000 ]; then
+    health_state="Replace Soon"
+elif [ "$cycle_count" -ge 1000 ]; then
+    health_state="Replace Now"
+else
+    health_state="Service Battery"
+fi
+
+# Print Battery Cycle Count and Health State
+echo "<result>Cycle Count: $cycle_count, Health State: $health_state</result>"
