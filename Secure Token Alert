@@ -1,0 +1,34 @@
+#!/bin/bash
+
+
+loggedInUser=$(stat -f%Su /dev/console)
+jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
+windowType="hud"
+description="Secure Token Enablement
+
+The IT Team has received an alert from Jamf MDM regarding your device requiring Secure Token enablement.
+
+Please follow these steps:
+
+From your desktop navigate to Finder > Applications > open the WizeHire's Self Service. Or you can use the WizeHire icon located on your dock.
+
+Within the Notifications tab to the left you will see the update named WizeHire IT Secure Token.
+Please click on Enable button, and afterward you will be prompted to enter your laptop password (The same used for login into your company laptop).
+Afterwards there won't be any additional input required from you and you can proceed as normal.
+
+Thank you for you assistance and please reach out to the IT Team with any additional questions."
+
+button1="Close"
+icon="/Library/Application Support/JAMF/JamfCustomApps/WizeHire_Leaf_Mark_Green.png"
+title="FileVault: Secure Token Enablement"
+alignDescription="justice" 
+alignHeading="center"
+defaultButton="2"
+timeout="1000"
+
+# JAMF Helper window as it appears for targeted computers
+userChoice=$("$jamfHelper" -windowType "$windowType" -lockHUD -title "$title" -timeout "$timeout" -defaultButton "$defaultButton" -icon "$icon" -description "$description" -alignDescription "$alignDescription" -alignHeading "$alignHeading" -button1 "$button1")
+
+[ "$userChoice" == "0" ];
+   echo "User clicked Close or timeout was reached; now exiting."
+   exit 0    
