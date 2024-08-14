@@ -1,0 +1,4 @@
+#!/bin/zsh
+# shellcheck shell=bash
+## Trigger update operation to force-Install the latest recommended macOS Installer. -all All appropriate updates.
+softwareupdate --fetch-full-installer --full-installer-version 13.5.2 -i -a --force --agree-to-license
