@@ -1,0 +1,15 @@
+#!/bin/bash
+
+##Find the name of the logged in User
+currentUser=$(ls -l /dev/console | /usr/bin/awk '{ print $3 }')
+
+if [ "$currentUser" != "root" ]
+then
+
+##Find the user's full name
+FullName=$(dscl . read /users/"$currentUser" RealName | awk -F ":" 'END {sub(/ /,"");print $1}')
+
+##Update their jamf computer record with the users full name
+jamf recon -endUsername "$currentUser" -realname "$FullName"
+
+fi
