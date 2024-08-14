@@ -1,0 +1,420 @@
+#!/bin/sh
+#
+# This script downloads and installs the latest Chrome player for compatible Macs
+# 11/21/2018
+# Version 2
+# tomr
+
+# Version 2.2 Update: 1/20/21
+# This update adds compatibility with Apple Silicon devices.  Script will download the Google Chrome Universal app.
+# This universal version is designed for Intel and M1 use.
+# Mason
+
+## DefineGlobalVariables
+### We must assign or process any command line arugments before processing other variables
+# Yes or No from paramter 4 to see if this is an interactive or silent install.
+ChromeSilentInstall="$4"
+### We must assign or process any command line arugments before processing other variables
+# Yes or No from paramter 5 to see if this is an forced install but still notifying the user.
+ChromeForcedInstall="$5"
+# Current Chrome version URL
+current_chrome_url="http://omahaproxy.appspot.com/all"
+# Current Chrome Download URL
+fileURL="https://dl.google.com/chrome/mac/universal/stable/CHFA/googlechrome.dmg"
+# Version chrome currently installed on the client
+chrome_client_version=""
+# Major release version of Chrome
+chrome_major_version=""
+# Current full version of Chrome release
+chrome_full_version=""
+# StandardChromeInstallLocation
+ChromeLocation="/Applications/Google Chrome.app"
+# Specify name of the local disk image flash player will be downloaded to
+chrome_dmg="/tmp/chrome.dmg"
+# JAMF Helper Path
+JAMFHelperPath="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
+# JAMF Helper Title
+JAMFHelperTitle="Electric Software Installation"
+# JAMF Helper Heading
+JAMFHelperHeading="Chrome Installation"
+# JAMF Helper Icon - Set Default Icon For Jamf Helper
+JAMFHelperIcon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/BookmarkIcon.icns"
+# Chrome Icon
+ChromeIcon="/Applications/Google Chrome.app/Contents/Resources/app.icns"
+
+# Determine OS version
+osvers=$(sw_vers -productVersion | awk -F. '{print $2}')
+
+# Determine Current Logged in User
+currentUser=$(ls -l /dev/console | /usr/bin/awk '{ print $3 }')
+
+#See if Self Service is Branded for the current user so we can use that icon for JAMF Helper
+if [ -e "/Users/$currentUser/Library/Application Support/com.jamfsoftware.selfservice.mac/Documents/Images/brandingimage.png" ]
+   then
+   JAMFHelperIcon="/Users/$currentUser/Library/Application Support/com.jamfsoftware.selfservice.mac/Documents/Images/brandingimage.png"
+   fi
+
+cleanUp()
+{
+# Clean up an remnants of an failed prior executions
+# Since we expect the following 3 commands to potentially fail
+# we redirect both stdout and stderr to /dev/null
+# ------------------------------------------------
+/usr/bin/hdiutil detach chrome.* &> /dev/null
+/bin/rm -rf /tmp/chrome.* &> /dev/null
+/bin/rm -rf /tmp/chrome.dmg &> /dev/null
+# ----------------------------------------------- 
+}
+
+checkChromeVersions()
+{
+# Determine the version of Chrome currently on the computer.
+# This assumes chrome is installed in its default location.
+if [ -d "$ChromeLocation" ]
+   then
+   chrome_client_version=`/usr/bin/defaults read "$ChromeLocation"/Contents/Info CFBundleShortVersionString`
+   fi
+
+# Determine the current full version of Chrome
+# Curl looks at the web address passed in by the 4th argument which contains the link to the latest version offical release for the English language version of Chrome for OS X.
+# Since this returns all of the html on the page grep limits the search just for the mac,stable which also returns the current link to the download dmg but all on one line.
+
+
+chrome_full_version=`/usr/bin/curl --silent "$current_chrome_url" | grep mac,stable | awk -F , '{print $3}'`
+
+# Determine current major version of Google Chrome
+# This curl command is similar to the previous one except it returns the just the major version number from the Mozilla Website.  
+# The last cut breaks up that html at periods and returns the first field which is the current major version of Chrome.
+# Now commented out because we can extract the version # from the chrome_full_version variable locally instead of needing a second curl.
+# This variable is still Not currently used but could be useful later. 
+#chrome_major_version=`/usr/bin/curl --silent "$current_chrome_url" | grep dmg | cut -d / -f 7 | cut -d . -f 1`
+
+chrome_major_version=`echo $chrome_full_version | cut -d . -f 1`
+
+}
+
+removeChrome()
+{
+
+echo "Stopping and Removing the current install of Google Chrome."
+
+## We need to use killall with the -9 flag otherwise the entire FireFox process group won't quit
+## And at some point Chrome changed the binary name to lowercasse so we include both processes.
+killall -9 "Google Chrome"
+sleep 1
+
+if [ -e "$ChromeLocation" ]
+   then
+   /bin/rm -rf "$ChromeLocation"
+   else
+   echo "No current installation of Chrome found in the default location."
+fi
+
+}
+
+downloadChrome()
+{
+
+killall jamfHelper
+
+
+"$JAMFHelperPath" -windowType utility -title "$JAMFHelperTitle" \
+    -icon "$JAMFHelperIcon" -iconSize 96 -heading "$JAMFHelperHeading" -alignHeading center -description "Downloading Chrome" \
+    -alignDescription center &
+
+    jamfHelperPID=$(pgrep jamfHelper)
+
+    disown $jamfHelperPID
+
+  # Download the latest Chrome software disk image	
+  # We use Curl with the --progress-bar option so it only displays information about its download progress
+  # When then have to send curl output to stdout because it defaults to stderr
+	
+   /usr/bin/curl --progress-bar --output "$chrome_dmg" "$fileURL" 2>&1 
+
+   killall jamfHelper
+
+    "$JAMFHelperPath" -windowType utility -title "$JAMFHelperTitle" \
+    -icon "$JAMFHelperIcon" -iconSize 96 -heading "$JAMFHelperHeading" -alignHeading center -description "Installing Chrome" \
+    -alignDescription center &
+
+    jamfHelperPID=$(pgrep jamfHelper)
+
+    disown $jamfHelperPID
+
+    # Specify a /tmp/chrome.XXXX mountpoint for the disk image.
+    # Using mktemp allows the chrome mount point to get created with 4 random characters after
+    # the . This unqique name (which is temporary) provides a greater degree of certainity that
+    # the same name and as a result data won't be used. The -d option indicates that this is a 
+    # directory since this is needed for a mountpoint.		
+ 
+    TMPMOUNT=`/usr/bin/mktemp -d /tmp/chrome.XXXX`
+
+    # Mount the latest Chrome disk image to /tmp/chrome.XXXX mountpoint
+ 
+    /usr/bin/hdiutil attach "$chrome_dmg" -mountpoint "$TMPMOUNT" -nobrowse -noverify -noautoopen
+
+    # Progress message with bar at 50% to let users know installation is continuing
+    # At this point we are copying chrome
+    
+    # Copy Chrome from the the disk image, set the appropriate permissions, and remove extend attributes
+    # User the R option to make sure sub files are copied. Use p to preserve the finder icon. Can
+    # prob switch this to rsync
+
+    /bin/cp -Rp  $TMPMOUNT/Google\ Chrome.app /Applications
+
+    sleep .5
+
+    /usr/sbin/chown -R root:admin "$ChromeLocation"
+    /bin/chmod -R 775 "$ChromeLocation"
+    /usr/bin/xattr -d com.apple.quarantine "$ChromeLocation"
+    
+    # Clean-up
+
+    killall jamfHelper
+
+    "$JAMFHelperPath" -windowType utility -title "$JAMFHelperTitle" \
+    -icon "$JAMFHelperIcon" -iconSize 96 -heading "$JAMFHelperHeading" -alignHeading center -description "Finishing Up" \
+    -alignDescription center & 
+
+    jamfHelperPID=$(pgrep jamfHelper)
+
+    disown $jamfHelperPID
+
+    sleep 2
+
+    # Unmount the Chrome Player disk image from /tmp/flashplayer.XXXX
+ 
+    /usr/bin/hdiutil detach "$TMPMOUNT"
+ 
+    # Remove the /tmp/chrome.XXXX mountpoint
+ 
+    /bin/rm -rf "$TMPMOUNT"
+
+    # Remove the downloaded disk image
+
+    /bin/rm -rf "$chrome_dmg"
+
+##  Close jamf helper and display the finished message to the user
+
+killall jamfHelper
+
+VersionCompleteMsg="Version $chrome_full_version of Chrome is now installed.
+
+Click Finish to complete the installation."
+
+UserResponse=$("$JAMFHelperPath" -windowType utility -title "$JAMFHelperTitle" \
+-icon "$ChromeIcon" -iconSize 128 -heading "$JAMFHelperHeading" -alignHeading center -description "$VersionCompleteMsg" \
+-alignDescription center -button1 "Finish" )
+
+}
+
+installChrome()
+{
+cleanUp
+checkChromeVersions
+
+if [ "$chrome_client_version" == "$chrome_full_version" ]
+      then
+           VersionMatchMsg="You are currently running version $chrome_client_version of Chrome.
+
+This is the latest version available.
+		
+Would you like to quit Chrome and reinstall?"
+
+               UserResponse=$("$JAMFHelperPath" -windowType utility -title "$JAMFHelperTitle" \
+               -icon "$ChromeIcon" -iconSize 128 -heading "$JAMFHelperHeading" -alignHeading center -description "$VersionMatchMsg" \
+               -alignDescription center -button1 "Reinstall" -button2 "Cancel" -cancelButton 2 )
+               if [ $UserResponse == 2 ]
+                then
+                  echo "User Chose to cancel the installation." 
+                elif [ $UserResponse == 0 ]
+		            then
+                  # We capture the JAMF Helper's PID so we can pass it to the disown command which removes it from
+                  # the shell's list of watched jobs. The prevents debug messages from being generated when killing the process.
+                  ## Disown works more reliably then using "wait" for the shell to release the job and piping the output to /dev/null
+                  jamfHelperPID=$(pgrep jamfHelper)
+                  disown $jamfHelperPID
+                   removeChrome
+                   downloadChrome
+		                exit 0
+                fi
+      elif echo "$chrome_client_version $chrome_full_version" | awk '{exit $1<$2?0:1}'
+      then
+       VersionMatchMsg="Version $chrome_full_version of Chrome is available.
+
+You are currently running version $chrome_client_version
+
+Would you like to quit Chrome and update?"
+
+               UserResponse=$("$JAMFHelperPath" -windowType utility -title "$JAMFHelperTitle" \
+               -icon "$ChromeIcon" -iconSize 128 -heading "$JAMFHelperHeading" -alignHeading center -description "$VersionMatchMsg" \
+               -alignDescription center -button1 "Update" -button2 "Cancel" -cancelButton 2 )
+               
+               if [ $UserResponse == 2 ]
+                then
+                echo "User Chose to cancel the installation." 
+                elif [ $UserResponse = 0 ]
+                then
+                  # We capture the JAMF Helper's PID so we can pass it to the disown command which removes it from
+                  # the shell's list of watched jobs. The prevents debug messages from being generated when killing the process.
+                  ## Disown works more reliably then using "wait" for the shell to release the job and piping the output to /dev/null
+                  jamfHelperPID=$(pgrep jamfHelper)
+                  disown $jamfHelperPID
+                   removeChrome
+                   downloadChrome
+                   exit 0
+		fi
+      elif [ "$chrome_client_version" == "" ]
+      then
+       VersionMatchMsg="Chrome is not currently installed.
+
+Or a supported version cannot be found within the Applications folder.
+
+Would you like to install Chrome now?"
+
+               UserResponse=$("$JAMFHelperPath" -windowType utility -title "$JAMFHelperTitle" \
+               -icon "$JAMFHelperIcon" -iconSize 128 -heading "$JAMFHelperHeading" -alignHeading center -description "$VersionMatchMsg" \
+               -alignDescription center -button1 "Install" -button2 "Cancel" -cancelButton 2 )
+               
+               if [ $UserResponse = 2 ]
+                then
+                echo "User Chose to cancel the installation." 
+                elif [ $UserResponse = 0 ]
+                then
+                  # We capture the JAMF Helper's PID so we can pass it to the disown command which removes it from
+                  # the shell's list of watched jobs. The prevents debug messages from being generated when killing the process.
+                  ## Disown works more reliably then using "wait" for the shell to release the job and piping the output to /dev/null
+                  jamfHelperPID=$(pgrep jamfHelper)
+                  disown $jamfHelperPID
+                   removeChrome
+                   downloadChrome
+                   exit 0 
+                fi
+      fi
+}
+
+ChromeSilentInstall()
+{
+   echo "Installation being performed with no user interaction."
+   echo "Chrome being removed and downloaded with no user interaction."
+
+   ## Invoke the functions to clean up any previous installation remenants, remove the current Chrome
+   ## install, and get information about the latest available version of Chrome.
+
+   cleanUp
+   removeChrome
+
+    # Download the latest Chrome dmg file. 
+    # We use Curl with the --silent option so it only minimal information is displayed since this is an unattended install.
+    # When then have to send curl output to stdout because it defaults to stderr
+    
+    /usr/bin/curl -L --silent --output "$chrome_dmg" "$fileURL" 2>&1
+
+    # Specify a /tmp/Chrome.XXXX mountpoint for the disk image.
+    # Using mktemp allows the Chrome mount point to get created with 4 random characters after
+    # the . This unqique name (which is temporary) provides a greater degree of certainity that
+    # the same name and as a result data won't be used. The -d option indicates that this is a 
+    # directory since this is needed for a mountpoint.
+   
+    TMPMOUNT=`/usr/bin/mktemp -d /tmp/Chrome.XXXX`
+
+   # Mount the latest Chrome disk image to /tmp/Chrome.XXXX mountpoin
+
+    /usr/bin/hdiutil attach "$chrome_dmg" -mountpoint "$TMPMOUNT" -nobrowse -noverify -noautoopen
+
+    # Once the dmg is mounted since this is just a drag and drop install of the app bundle
+    # we can simple copy the Chrome app to the Applications folder.
+
+    /bin/cp -Rp  $TMPMOUNT/Google\ Chrome.app /Applications
+
+    # Set the correct permissions for the Chrome just in case and remove
+    # the extended attribute if it exists.
+     
+    /usr/sbin/chown -R root:admin "$ChromeLocation"
+    /bin/chmod -R 755 "$ChromeLocation"
+    /usr/bin/xattr -d com.apple.quarantine "$ChromeLocation"
+
+    # Unmount the Chrome disk image from /tmp/Chrome.XXXX
+ 
+    /usr/bin/hdiutil detach "$TMPMOUNT"
+ 
+    # Remove the /tmp/Chrome.XXXX mountpoint
+ 
+    /bin/rm -rf "$TMPMOUNT"
+
+    # Remove the downloaded Chrome disk image
+    
+    /bin/rm -rf "$chrome_dmg"
+    
+    # Confirm the version of the newly installer Chrome client. 
+    
+    if [ -d "$ChromeLocation" ]
+       then
+       chrome_client_version=`/usr/bin/defaults read "$ChromeLocation"/Contents/Info CFBundleShortVersionString`
+       echo "Chrome $chrome_client_version been installed."
+    fi
+    
+    echo "Chrome installed via silent install. Not providing any information to the user."
+
+}
+
+ChromeForcedInstall()
+{
+cleanUp
+checkChromeVersions
+
+if [ "$chrome_client_version" == "$chrome_full_version" ]
+      then
+      echo "User is running the latest version of Chrome. Skipping execution."
+
+      elif echo "$chrome_client_version $chrome_full_version" | awk '{exit $1<$2?0:1}'
+      then
+       VersionMatchMsg="Version $chrome_full_version of Chrome is available.
+
+You are currently running version $chrome_client_version
+
+You must update to the latest version.
+
+Would you like to quit Chrome and update now?
+"
+
+               UserResponse=$("$JAMFHelperPath" -windowType utility -title "$JAMFHelperTitle" \
+               -icon "$ChromeIcon" -iconSize 128 -heading "$JAMFHelperHeading" -alignHeading center -description "$VersionMatchMsg" \
+               -alignDescription center -button1 "Update" -button2 "Cancel" -cancelButton 2 )
+               
+               if [ $UserResponse == 2 ]
+                then
+                echo "User Chose to cancel the installation." 
+                elif [ $UserResponse = 0 ]
+                then
+                  # We capture the JAMF Helper's PID so we can pass it to the disown command which removes it from
+                  # the shell's list of watched jobs. The prevents debug messages from being generated when killing the process.
+                  ## Disown works more reliably then using "wait" for the shell to release the job and piping the output to /dev/null
+                  jamfHelperPID=$(pgrep jamfHelper)
+                  disown $jamfHelperPID
+                  removeChrome
+                  downloadChrome
+                  exit 0
+		fi
+      elif [ "$chrome_client_version" == "" ]
+      then
+      echo "Chrome is not installed or not in the default location. Skipping execution."
+      fi
+}
+
+## All script executable code here
+
+# We check if the vaule in passed in to JAMF is yes so we know if we have to suppress user
+# notifications. We take all upercasper characters and translter them to lowercase as well so we only
+# have to check to see if the input variable matches "yes".
+
+if [[ $(echo "$ChromeSilentInstall" | tr '[:upper:]' '[:lower:]') == "yes" ]]
+then
+ChromeSilentInstall 
+elif [[ $(echo "$ChromeForcedInstall" | tr '[:upper:]' '[:lower:]') == "yes" ]]
+then
+ChromeForcedInstall
+else
+installChrome
+fi
