@@ -1,0 +1,1 @@
+/Library/Management/erase-install/erase-install.sh  --version 14.5 --force-curl  --min-drive-space  --overwrite --depnotify --no-fs --update --reinstall --current-user --cleanup-after-use --check-power --power-wait-limit 240 --max-password-attempts 3 --rebootdelay 180
