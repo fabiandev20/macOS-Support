@@ -1,0 +1,124 @@
+#!/bin/bash
+
+# Created by Fabian Marin
+# Version 3.0
+# This script automates Mac restarts based on uptime, using SwiftDialog for UI prompts and AppleScript for logic to handle warnings and forced reboots.
+
+# Constants and paths
+SWIFTDIALOG_URL="https://github.com/swiftDialog/releases/download/v2.5.0/dialog-2.5.0-4768.pkg"
+SWIFTDIALOG_BIN="/usr/local/bin/dialog"
+SWIFTDIALOG_PKG="/tmp/dialog-2.5.0-4768.pkg"
+iconPath="/Users/fabianstevenmaringuerrero/Downloads/Logo.PNG"
+
+# Function to check and install SwiftDialog if not present
+check_and_install_swiftdialog() {
+    if [ ! -f "$SWIFTDIALOG_BIN" ]; then
+        echo "SwiftDialog not found. Downloading and installing SwiftDialog..."
+        curl -L -o "$SWIFTDIALOG_PKG" "$SWIFTDIALOG_URL"
+        
+        if [ $? -ne 0 ]; then
+            echo "Failed to download SwiftDialog. Exiting."
+            exit 1
+        fi
+        
+        installer -pkg "$SWIFTDIALOG_PKG" -target /
+        
+        if [ $? -ne 0 ]; then
+            echo "Failed to install SwiftDialog. Exiting."
+            exit 1
+        fi
+        
+        echo "SwiftDialog installed successfully."
+    fi
+}
+
+# Install SwiftDialog if needed
+check_and_install_swiftdialog
+
+# Check if a parameter is passed to the script, if not, sets the default value to 0.
+if [ -n "$1" ]; then
+    maxUptime=$1
+else
+    maxUptime=1
+fi
+
+# Sets the timeout for restart prompts to 60 seconds.
+timeout=120 # seconds until restart
+
+# Function to restart the system using AppleScript
+appleScriptRestart() {
+    osascript <<EOD
+    tell application "System Events"
+        restart
+    end tell
+EOD
+}
+
+# Function to show a regressive countdown timer
+regressiveCountdown() {
+    local remainingTime=$timeout
+    while [ $remainingTime -gt 0 ]; do
+        "$SWIFTDIALOG_BIN" --mini --title "Restart in Progress -Testing by FM" --icon "$iconPath" --message "Your Mac will restart in $remainingTime seconds. Please close and save ANY OPEN work" --messagealignment center --messageposition center --progress --progresscurrent $((timeout - remainingTime)) --progressmax $timeout &
+        sleep 1
+        remainingTime=$((remainingTime - 1))
+    done
+}
+
+# Function to start the countdown and restart the system
+niceRestart() {
+    echo "User chose to restart now."
+    regressiveCountdown  # Display the countdown timer
+    appleScriptRestart   # Restart the system after the countdown
+}
+
+# Function to prompt the user for a restart warning
+warningPrompt() {
+    "$SWIFTDIALOG_BIN" \
+        --ontop \
+        --title "Restart Warning - Testing by Fabian Marin" \
+        --icon "$iconPath" \
+        --message "Please restart your Mac soon. It has been online for $uptimeDays days without rebooting." \
+        --messagealignment center \
+        --messageposition center \
+        --button1text "Restart Now" \
+        --button2text "Restart Later" \
+        --buttonstyle stack
+
+    response=$?  # Capture the exit status of the command
+
+    if [[ "$response" == "0" ]]; then
+        echo "User chose to restart now."
+        niceRestart
+    elif [[ "$response" == "2" ]]; then
+        echo "User chose to restart later."
+    else
+        echo "Unexpected response: $response"
+    fi
+}
+
+
+
+# Function to force a restart
+tooLatePrompt() {
+    niceRestart # Start the countdown and handle restart when the timer ends
+}
+
+# Retrieves the number of days the system has been online.
+uptimeRaw="$(uptime | grep day)"
+
+if [[ -n "$uptimeRaw" ]]; then
+    uptimeDays=$(echo "$uptimeRaw" | awk '{print $3}')
+else
+    uptimeDays=0
+fi
+
+echo "Mac uptime: $uptimeDays days."
+echo "Warning days: $((maxUptime/2))"
+echo "Force days: $maxUptime"
+
+# Decision-making logic for rebooting
+if [ $uptimeDays -ge $maxUptime ]; then
+    tooLatePrompt        # force reboot
+elif [ $uptimeDays -ge $((maxUptime/2)) ]; then
+    warningPrompt        # give a warning
+fi
